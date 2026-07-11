@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Admin — Publish Partner Summaries</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{ --bg:#0f1220; --card:#171b2e; --accent:#5b8def; --text:#e8eaf2; --muted:#9aa3c0; --green:#3ecf8e; --red:#ff6b6b; --amber:#ffb84d; }
+  *{box-sizing:border-box;}
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  header{
+    padding:18px 28px; background:linear-gradient(135deg,#1c2140,#0f1220);
+    border-bottom:1px solid #262b45; display:flex; align-items:center; justify-content:space-between;
+  }
+  header h1{ font-size:19px; margin:0; }
+  header p{ margin:3px 0 0; color:var(--muted); font-size:12.5px; }
+  #logoutBtn{ background:#2b3057; border:none; color:#fff; padding:8px 16px; border-radius:8px; font-size:13px; cursor:pointer; }
+  main{ padding:24px 28px; max-width:900px; }
+
+  .upload-zone{
+    padding:26px; border:2px dashed #3a4070; border-radius:14px; text-align:center;
+    background:var(--card); cursor:pointer; margin-bottom:20px;
+  }
+  .upload-zone input{ display:none; }
+  .btn{ display:inline-block; margin-top:10px; padding:8px 18px; background:var(--accent); color:#fff; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; border:none; }
+  .btn.secondary{ background:#2b3057; }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+
+  table{ width:100%; border-collapse:collapse; font-size:13px; margin-bottom:20px; }
+  th,td{ padding:8px 10px; border-bottom:1px solid #262b45; text-align:left; }
+  th{ background:#1c2140; color:var(--muted); }
+
+  #status{ font-size:13px; margin-top:14px; white-space:pre-line; }
+  .ok{ color:var(--green); }
+  .err{ color:var(--red); }
+  #fileName{ color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Admin — Publish Weekly Summaries</h1>
+    <p id="fileName">Upload weekly export, review, then publish per-DISTI</p>
+  </div>
+  <button id="logoutBtn">Sign Out</button>
+</header>
+
+<main>
+  <div class="upload-zone" id="dropZone">
+    <div>📊 Drag & drop the weekly .xlsx file, or click to browse</div>
+    <label class="btn" for="fileInput">Choose File</label>
+    <input type="file" id="fileInput" accept=".xlsx,.xls">
+  </div>
+
+  <div id="preview" style="display:none;">
+    <table id="summaryTable"></table>
+    <button class="btn" id="publishBtn">Publish All DISTI Summaries</button>
+    <div id="status"></div>
+  </div>
+</main>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { firebaseConfig } from "./firebase-config.js";
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await signOut(auth);
+    window.location.href = './login.html';
+  });
+
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) { window.location.href = './login.html'; return; }
+    const snap = await getDoc(doc(db, 'users', user.uid));
+    if (!snap.exists() || snap.data().role !== 'admin') {
+      alert('Not authorized as admin.');
+      window.location.href = './login.html';
+    }
+  });
+
+  const DISTI_MAP = {
+    'croma': 'CROMA', 'reliance digital': 'Reliance Digital',
+    'vijay sales': 'Vijay Sales', 'ingram': 'INGRAM', 'redington': 'REDINGTON'
+  };
+  function normalizeDisti(v){
+    if(!v) return 'Unknown';
+    const key = String(v).trim().toLowerCase();
+    return DISTI_MAP[key] || v.trim();
+  }
+  function excelDateToJS(serial){
+    if(serial === null || serial === undefined || serial === '') return null;
+    if(typeof serial === 'string'){ const d = new Date(serial.replace(/\//g,'-')); return isNaN(d) ? null : d; }
+    if(typeof serial === 'number'){ const utc_days = Math.floor(serial - 25569); return new Date(utc_days*86400*1000); }
+    return null;
+  }
+  function computeSla(row){
+    const eta = excelDateToJS(row['ETA Date/SLA']);
+    const completed = excelDateToJS(row['Service Completed Date']);
+    if(!eta) return 'N/A';
+    if(!completed) return 'Pending';
+    const e = new Date(eta.getFullYear(), eta.getMonth(), eta.getDate());
+    const c = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate());
+    return c <= e ? 'Within SLA' : 'Out of SLA';
+  }
+  function countBy(rows, key){
+    const map = {};
+    rows.forEach(r => { const v = (r[key]==='' || r[key]===undefined) ? 'Unknown' : r[key]; map[v] = (map[v]||0)+1; });
+    return map;
+  }
+
+  let rowsByDisti = {};
+
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', e => e.preventDefault());
+  dropZone.addEventListener('drop', e => { e.preventDefault(); if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
+  fileInput.addEventListener('change', e => { if(e.target.files.length) handleFile(e.target.files[0]); });
+
+  function handleFile(file){
+    document.getElementById('fileName').textContent = 'Loaded: ' + file.name;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type:'array', cellDates:false });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' }).map(r => {
+        r['DISTI_norm'] = normalizeDisti(r['DISTI']);
+        r['SLA_calc'] = computeSla(r);
+        return r;
+      });
+
+      rowsByDisti = {};
+      rows.forEach(r => {
+        const d = r['DISTI_norm'];
+        if(!rowsByDisti[d]) rowsByDisti[d] = [];
+        rowsByDisti[d].push(r);
+      });
+
+      renderPreview();
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function renderPreview(){
+    document.getElementById('preview').style.display = 'block';
+    const distis = Object.keys(rowsByDisti).sort();
+    let html = '<tr><th>DISTI</th><th>Total</th><th>Closed</th><th>Within SLA</th><th>Out of SLA</th><th>Pending</th><th>SLA %</th></tr>';
+    distis.forEach(d => {
+      const rows = rowsByDisti[d];
+      const total = rows.length;
+      const closed = rows.filter(r=>r['Status']==='Closed').length;
+      const within = rows.filter(r=>r['SLA_calc']==='Within SLA').length;
+      const out = rows.filter(r=>r['SLA_calc']==='Out of SLA').length;
+      const pending = rows.filter(r=>r['SLA_calc']==='Pending').length;
+      const base = within+out;
+      const pct = base ? Math.round((within/base)*100) : 0;
+      html += `<tr><td>${d}</td><td>${total}</td><td>${closed}</td><td>${within}</td><td>${out}</td><td>${pending}</td><td>${pct}%</td></tr>`;
+    });
+    document.getElementById('summaryTable').innerHTML = html;
+  }
+
+  document.getElementById('publishBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('publishBtn');
+    const statusDiv = document.getElementById('status');
+    btn.disabled = true;
+    statusDiv.textContent = 'Publishing...';
+    statusDiv.className = '';
+
+    try {
+      const distis = Object.keys(rowsByDisti);
+      for (const d of distis) {
+        const rows = rowsByDisti[d];
+        const total = rows.length;
+        const closed = rows.filter(r=>r['Status']==='Closed').length;
+        const within = rows.filter(r=>r['SLA_calc']==='Within SLA').length;
+        const out = rows.filter(r=>r['SLA_calc']==='Out of SLA').length;
+        const pending = rows.filter(r=>r['SLA_calc']==='Pending').length;
+        const na = rows.filter(r=>r['SLA_calc']==='N/A').length;
+        const base = within+out;
+        const slaPct = base ? Math.round((within/base)*100) : 0;
+
+        const currentStatusCounts = countBy(rows, 'Current Status');
+        const tradeCounts = countBy(rows, 'Problem Area');
+
+        // Use lowercase, no-space key as document id (matches disti field on user docs)
+        const docId = d.trim().toLowerCase().replace(/\s+/g,'-');
+
+        await setDoc(doc(db, 'summaries', docId), {
+          disti: d,
+          kpis: { total, closed, within, outOfSla: out, pending, na, slaPct },
+          currentStatusCounts,
+          tradeCounts,
+          publishedAt: new Date().toISOString()
+        });
+      }
+      statusDiv.textContent = `Published summaries for ${distis.length} DISTIs successfully.`;
+      statusDiv.className = 'ok';
+    } catch (e) {
+      statusDiv.textContent = 'Publish failed: ' + e.message;
+      statusDiv.className = 'err';
+    }
+    btn.disabled = false;
+  });
+</script>
+</body>
+</html>
