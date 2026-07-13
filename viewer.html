@@ -242,7 +242,11 @@
       });
 
       if (allRows.length > 0) {
-        const wsRaw = XLSX.utils.json_to_sheet(allRows);
+        const colOrder = (currentData.columnOrder && currentData.columnOrder.length > 0)
+          ? currentData.columnOrder
+          : Object.keys(allRows[0]); // fallback if older publish has no saved order
+
+        const wsRaw = XLSX.utils.json_to_sheet(allRows, { header: colOrder });
         XLSX.utils.book_append_sheet(wb, wsRaw, 'Full Ticket Data');
       } else {
         const wsRawEmpty = XLSX.utils.aoa_to_sheet([['No row-level data available for this publish. Ask admin to re-publish.']]);

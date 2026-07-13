@@ -116,6 +116,7 @@
   }
 
   let rowsByDisti = {};
+  let originalColumnOrder = [];
 
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
@@ -136,6 +137,14 @@
       const data = new Uint8Array(e.target.result);
       const wb = XLSX.read(data, { type:'array', cellDates:false });
       const sheet = wb.Sheets[wb.SheetNames[0]];
+
+      // Capture the exact original column order from the header row (row 1),
+      // before sheet_to_json potentially loses/reorders it.
+      const headerRow = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 0 })[0] || [];
+      originalColumnOrder = headerRow.filter(h => h !== undefined && h !== '');
+      // System-added columns go at the end, in a fixed order
+      originalColumnOrder = originalColumnOrder.concat(['DISTI_norm', 'SLA_calc']);
+
       const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' }).map(r => {
         r['DISTI_norm'] = normalizeDisti(r['DISTI']);
         r['SLA_calc'] = computeSla(r);
@@ -210,6 +219,7 @@
           tradeCounts,
           rawRowCount: rows.length,
           rawRowChunks: numChunks,
+          columnOrder: originalColumnOrder,
           publishedAt: new Date().toISOString()
         });
 
