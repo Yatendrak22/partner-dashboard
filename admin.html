@@ -119,7 +119,12 @@
 
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
-  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('click', (e) => {
+    // Prevent double-trigger: if the click originated from the label/button itself,
+    // let its native "for" behavior open the picker — don't also fire this handler.
+    if (e.target.closest('label[for="fileInput"]')) return;
+    fileInput.click();
+  });
   dropZone.addEventListener('dragover', e => e.preventDefault());
   dropZone.addEventListener('drop', e => { e.preventDefault(); if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
   fileInput.addEventListener('change', e => { if(e.target.files.length) handleFile(e.target.files[0]); });
