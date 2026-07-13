@@ -175,8 +175,30 @@
       data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: isPieLike?2:0, borderColor:'#171b2e' }] },
       options: {
         plugins: {
-          legend: { position: type==='bar' ? 'none' : 'right', labels:{color:'#e8eaf2', font:{size:10.5}} },
-          datalabels: isPieLike ? { color:'#fff', font:{weight:'700', size:11}, formatter:(v)=>v } : { display:false }
+          legend: {
+            position: type==='bar' ? 'none' : 'right',
+            labels: {
+              color:'#e8eaf2', font:{size:10.5},
+              generateLabels: isPieLike ? (chart) => {
+                const ds = chart.data.datasets[0];
+                const total = ds.data.reduce((a,b)=>a+b,0);
+                return chart.data.labels.map((label, i) => {
+                  const value = ds.data[i];
+                  const pct = total ? Math.round((value/total)*100) : 0;
+                  return {
+                    text: `${label}: ${value} (${pct}%)`,
+                    fillStyle: ds.backgroundColor[i],
+                    strokeStyle: ds.borderColor,
+                    lineWidth: ds.borderWidth,
+                    fontColor: '#e8eaf2',
+                    color: '#e8eaf2',
+                    index: i
+                  };
+                });
+              } : undefined
+            }
+          },
+          datalabels: { display:false }
         },
         scales: type==='bar' ? {
           x:{ ticks:{color:'#9aa3c0', font:{size:10}}, grid:{color:'#262b45'} },
