@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Admin — Publish Partner Summaries</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   :root{ --bg:#0f1220; --card:#171b2e; --accent:#5b8def; --text:#e8eaf2; --muted:#9aa3c0; --green:#3ecf8e; --red:#ff6b6b; --amber:#ffb84d; }
   *{box-sizing:border-box;}
@@ -34,6 +35,28 @@
   .ok{ color:var(--green); }
   .err{ color:var(--red); }
   #fileName{ color:var(--muted); font-size:13px; }
+
+  .filters{ display:flex; gap:10px; flex-wrap:wrap; margin:16px 0; }
+  .filters select{
+    background:var(--card); color:var(--text); border:1px solid #2b3057; border-radius:8px;
+    padding:7px 12px; font-size:12.5px;
+  }
+  .kpis{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:16px; }
+  .kpi{ background:var(--card); border-radius:12px; padding:12px 14px; border:1px solid #262b45; }
+  .kpi .val{ font-size:21px; font-weight:700; }
+  .kpi .lbl{ font-size:11px; color:var(--muted); margin-top:3px; }
+  .kpi.green .val{ color:var(--green); }
+  .kpi.red .val{ color:var(--red); }
+  .kpi.amber .val{ color:var(--amber); }
+
+  .grid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-bottom:16px; }
+  .card{ background:var(--card); border-radius:12px; padding:12px 14px; border:1px solid #262b45; }
+  .card h3{ margin:0 0 8px; font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
+  canvas{ max-height:230px; }
+  main{ max-width:1400px; }
+
+  @media (max-width: 1200px){ .grid{ grid-template-columns:repeat(2,1fr); } .kpis{ grid-template-columns:repeat(3,1fr); } }
+  @media (max-width: 700px){ .grid{ grid-template-columns:1fr; } .kpis{ grid-template-columns:repeat(2,1fr); } }
 </style>
 </head>
 <body>
@@ -56,6 +79,21 @@
     <table id="summaryTable"></table>
     <button class="btn" id="publishBtn">Publish All DISTI Summaries</button>
     <div id="status"></div>
+  </div>
+
+  <div id="overview" style="display:none;">
+    <h2 style="font-size:16px; margin:28px 0 4px;">All Partners — Combined Overview</h2>
+    <p style="color:var(--muted); font-size:12.5px; margin:0 0 10px;">Live view across all DISTIs from the currently loaded file (filters below apply only to this view, not to what gets published)</p>
+    <div class="filters" id="overviewFilters"></div>
+    <div class="kpis" id="overviewKpis"></div>
+    <div class="grid">
+      <div class="card"><h3>DISTI-wise Tickets</h3><canvas id="ovChartDisti"></canvas></div>
+      <div class="card"><h3>SLA Adherence</h3><canvas id="ovChartSla"></canvas></div>
+      <div class="card"><h3>Current Status</h3><canvas id="ovChartStatus"></canvas></div>
+      <div class="card"><h3>Vendor-wise Tickets</h3><canvas id="ovChartVendor"></canvas></div>
+      <div class="card"><h3>Quarter-wise Tickets</h3><canvas id="ovChartQtr"></canvas></div>
+      <div class="card"><h3>Trade / Problem Area</h3><canvas id="ovChartTrade"></canvas></div>
+    </div>
   </div>
 </main>
 
@@ -117,6 +155,10 @@
 
   let rowsByDisti = {};
   let originalColumnOrder = [];
+  let allRowsFlat = [];
+  let overviewCharts = {};
+  let overviewFilterState = { disti: '', vendor: '', qtr: '' };
+  const OV_PALETTE = ['#5b8def','#3ecf8e','#ff6b6b','#ffb84d','#c792ea','#4ec9f0','#f0a500','#8bc34a','#e91e63','#607d8b'];
 
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
@@ -157,8 +199,10 @@
         if(!rowsByDisti[d]) rowsByDisti[d] = [];
         rowsByDisti[d].push(r);
       });
+      allRowsFlat = rows;
 
       renderPreview();
+      renderOverview();
     };
     reader.readAsArrayBuffer(file);
   }
@@ -179,6 +223,123 @@
       html += `<tr><td>${d}</td><td>${total}</td><td>${closed}</td><td>${within}</td><td>${out}</td><td>${pending}</td><td>${pct}%</td></tr>`;
     });
     document.getElementById('summaryTable').innerHTML = html;
+  }
+
+  function getFilteredOverviewRows(){
+    let rows = allRowsFlat;
+    if (overviewFilterState.disti) rows = rows.filter(r => r['DISTI_norm'] === overviewFilterState.disti);
+    if (overviewFilterState.vendor) rows = rows.filter(r => r['Vendor'] === overviewFilterState.vendor);
+    if (overviewFilterState.qtr) rows = rows.filter(r => r['QTR'] === overviewFilterState.qtr);
+    return rows;
+  }
+
+  function ovMakeChart(id, type, labels, data, colors){
+    const ctx = document.getElementById(id);
+    if(overviewCharts[id]) overviewCharts[id].destroy();
+    const isPieLike = type === 'pie' || type === 'doughnut';
+    overviewCharts[id] = new Chart(ctx, {
+      type,
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: isPieLike?2:0, borderColor:'#171b2e' }] },
+      options: {
+        plugins: {
+          legend: {
+            position: type==='bar' ? 'none' : 'right',
+            labels: {
+              color:'#e8eaf2', font:{size:10.5},
+              generateLabels: isPieLike ? (chart) => {
+                const ds = chart.data.datasets[0];
+                const total = ds.data.reduce((a,b)=>a+b,0);
+                return chart.data.labels.map((label, i) => {
+                  const value = ds.data[i];
+                  const pct = total ? Math.round((value/total)*100) : 0;
+                  return {
+                    text: `${label}: ${value} (${pct}%)`,
+                    fillStyle: ds.backgroundColor[i],
+                    strokeStyle: ds.borderColor,
+                    lineWidth: ds.borderWidth,
+                    fontColor: '#e8eaf2', color: '#e8eaf2',
+                    index: i
+                  };
+                });
+              } : undefined
+            }
+          }
+        },
+        scales: type==='bar' ? {
+          x:{ ticks:{color:'#9aa3c0', font:{size:10}}, grid:{color:'#262b45'} },
+          y:{ ticks:{color:'#9aa3c0'}, grid:{color:'#262b45'} }
+        } : {}
+      }
+    });
+  }
+
+  function renderOverview(){
+    document.getElementById('overview').style.display = 'block';
+    buildOverviewFilters();
+
+    const rows = getFilteredOverviewRows();
+    const total = rows.length;
+    const closed = rows.filter(r=>r['Status']==='Closed').length;
+    const within = rows.filter(r=>r['SLA_calc']==='Within SLA').length;
+    const out = rows.filter(r=>r['SLA_calc']==='Out of SLA').length;
+    const pending = rows.filter(r=>r['SLA_calc']==='Pending').length;
+    const na = rows.filter(r=>r['SLA_calc']==='N/A').length;
+    const base = within+out;
+    const slaPct = base ? Math.round((within/base)*100) : 0;
+
+    document.getElementById('overviewKpis').innerHTML = `
+      <div class="kpi"><div class="val">${total}</div><div class="lbl">Total Tickets</div></div>
+      <div class="kpi green"><div class="val">${closed}</div><div class="lbl">Closed</div></div>
+      <div class="kpi green"><div class="val">${within}</div><div class="lbl">Within SLA</div></div>
+      <div class="kpi red"><div class="val">${out}</div><div class="lbl">Out of SLA</div></div>
+      <div class="kpi amber"><div class="val">${slaPct}%</div><div class="lbl">SLA Adherence Rate</div></div>
+    `;
+
+    const distiCounts = countBy(rows, 'DISTI_norm');
+    ovMakeChart('ovChartDisti', 'pie', Object.keys(distiCounts), Object.values(distiCounts), OV_PALETTE);
+
+    ovMakeChart('ovChartSla', 'doughnut',
+      ['Within SLA','Out of SLA','Pending','N/A'],
+      [within, out, pending, na],
+      ['#3ecf8e','#ff6b6b','#ffb84d','#5b5f7a']
+    );
+
+    const statusCounts = countBy(rows, 'Current Status');
+    ovMakeChart('ovChartStatus', 'pie', Object.keys(statusCounts), Object.values(statusCounts), OV_PALETTE);
+
+    const vendorCounts = countBy(rows, 'Vendor');
+    ovMakeChart('ovChartVendor', 'bar', Object.keys(vendorCounts), Object.values(vendorCounts), OV_PALETTE);
+
+    const qtrCounts = countBy(rows, 'QTR');
+    ovMakeChart('ovChartQtr', 'bar', Object.keys(qtrCounts), Object.values(qtrCounts), OV_PALETTE);
+
+    const tradeCounts = countBy(rows, 'Problem Area');
+    ovMakeChart('ovChartTrade', 'bar', Object.keys(tradeCounts), Object.values(tradeCounts), OV_PALETTE);
+  }
+
+  function buildOverviewFilters(){
+    const distiOptions = [...new Set(allRowsFlat.map(r => r['DISTI_norm']))].sort();
+    const vendorOptions = [...new Set(allRowsFlat.map(r => r['Vendor']).filter(v => v !== undefined && v !== ''))].sort();
+    const qtrOptions = [...new Set(allRowsFlat.map(r => r['QTR']).filter(v => v !== undefined && v !== ''))].sort();
+
+    const filtersDiv = document.getElementById('overviewFilters');
+    filtersDiv.innerHTML = `
+      <select id="ovDistiFilter">
+        <option value="">All DISTIs</option>
+        ${distiOptions.map(d => `<option value="${d}" ${d===overviewFilterState.disti?'selected':''}>${d}</option>`).join('')}
+      </select>
+      <select id="ovVendorFilter">
+        <option value="">All Vendors</option>
+        ${vendorOptions.map(v => `<option value="${v}" ${v===overviewFilterState.vendor?'selected':''}>${v}</option>`).join('')}
+      </select>
+      <select id="ovQtrFilter">
+        <option value="">All Quarters</option>
+        ${qtrOptions.map(q => `<option value="${q}" ${q===overviewFilterState.qtr?'selected':''}>${q}</option>`).join('')}
+      </select>
+    `;
+    document.getElementById('ovDistiFilter').addEventListener('change', e => { overviewFilterState.disti = e.target.value; renderOverview(); });
+    document.getElementById('ovVendorFilter').addEventListener('change', e => { overviewFilterState.vendor = e.target.value; renderOverview(); });
+    document.getElementById('ovQtrFilter').addEventListener('change', e => { overviewFilterState.qtr = e.target.value; renderOverview(); });
   }
 
   document.getElementById('publishBtn').addEventListener('click', async () => {
@@ -206,6 +367,8 @@
 
         const currentStatusCounts = countBy(rows, 'Current Status');
         const tradeCounts = countBy(rows, 'Problem Area');
+        const vendorCounts = countBy(rows, 'Vendor');
+        const qtrCounts = countBy(rows, 'QTR');
 
         // Use lowercase, no-space key as document id (matches disti field on user docs)
         const docId = d.trim().toLowerCase().replace(/\s+/g,'-');
@@ -217,6 +380,8 @@
           kpis: { total, closed, within, outOfSla: out, pending, na, slaPct },
           currentStatusCounts,
           tradeCounts,
+          vendorCounts,
+          qtrCounts,
           rawRowCount: rows.length,
           rawRowChunks: numChunks,
           columnOrder: originalColumnOrder,

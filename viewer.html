@@ -42,6 +42,12 @@
   .kpi.red .val{ color:var(--red); }
   .kpi.amber .val{ color:var(--amber); }
 
+  .filters{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .filters select{
+    background:var(--card); color:var(--text); border:1px solid #2b3057; border-radius:8px;
+    padding:7px 12px; font-size:12.5px;
+  }
+
   .grid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-bottom:16px; }
   .card{ background:var(--card); border-radius:12px; padding:14px 16px; border:1px solid #262b45; }
   .card h3{ margin:0 0 10px; font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
@@ -70,11 +76,14 @@
   <div id="errorMsg" style="display:none;"></div>
 
   <div id="content" style="display:none;">
+    <div class="filters" id="viewerFilters"></div>
     <div class="kpis" id="kpis"></div>
     <div class="grid">
       <div class="card"><h3>SLA Adherence</h3><canvas id="chartSla"></canvas></div>
       <div class="card"><h3>Current Status</h3><canvas id="chartCurrentStatus"></canvas></div>
       <div class="card"><h3>Trade / Problem Area</h3><canvas id="chartTrade"></canvas></div>
+      <div class="card"><h3>Vendor-wise Tickets</h3><canvas id="chartVendor"></canvas></div>
+      <div class="card"><h3>Quarter-wise Tickets</h3><canvas id="chartQtr"></canvas></div>
     </div>
     <div id="lastUpdated"></div>
   </div>
@@ -96,6 +105,8 @@
 
   let currentDisti = null;
   let currentData = null;
+  let currentRawRows = null; // fetched lazily once filters are needed
+  let viewerFilterState = { vendor: '', qtr: '' };
 
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     await signOut(auth);
@@ -162,10 +173,98 @@
     const trade = data.tradeCounts || {};
     makeChart('chartTrade', 'bar', Object.keys(trade), Object.values(trade), PALETTE);
 
+    const vendor = data.vendorCounts || {};
+    makeChart('chartVendor', 'bar', Object.keys(vendor), Object.values(vendor), PALETTE);
+
+    const qtr = data.qtrCounts || {};
+    makeChart('chartQtr', 'bar', Object.keys(qtr), Object.values(qtr), PALETTE);
+
     if (data.publishedAt) {
       const d = new Date(data.publishedAt);
       document.getElementById('lastUpdated').textContent = 'Last updated: ' + d.toLocaleString();
     }
+
+    loadFiltersAndEnable(disti);
+  }
+
+  async function loadFiltersAndEnable(docId){
+    try {
+      const chunksSnap = await getDocs(collection(db, 'summaries', docId, 'rawRows'));
+      let rows = [];
+      chunksSnap.forEach(chunkDoc => {
+        const chunkData = chunkDoc.data();
+        if (chunkData.rows) rows = rows.concat(chunkData.rows);
+      });
+      currentRawRows = rows;
+      buildViewerFilters();
+    } catch (e) {
+      // If raw rows aren't available (e.g., older publish), filters simply won't appear.
+      currentRawRows = null;
+    }
+  }
+
+  function buildViewerFilters(){
+    if (!currentRawRows || currentRawRows.length === 0) return;
+    const vendorOptions = [...new Set(currentRawRows.map(r => r['Vendor']).filter(v => v !== undefined && v !== ''))].sort();
+    const qtrOptions = [...new Set(currentRawRows.map(r => r['QTR']).filter(v => v !== undefined && v !== ''))].sort();
+
+    const filtersDiv = document.getElementById('viewerFilters');
+    filtersDiv.innerHTML = `
+      <select id="vendorFilter">
+        <option value="">All Vendors</option>
+        ${vendorOptions.map(v => `<option value="${v}" ${v===viewerFilterState.vendor?'selected':''}>${v}</option>`).join('')}
+      </select>
+      <select id="qtrFilter">
+        <option value="">All Quarters</option>
+        ${qtrOptions.map(q => `<option value="${q}" ${q===viewerFilterState.qtr?'selected':''}>${q}</option>`).join('')}
+      </select>
+    `;
+    document.getElementById('vendorFilter').addEventListener('change', e => { viewerFilterState.vendor = e.target.value; applyViewerFilters(); });
+    document.getElementById('qtrFilter').addEventListener('change', e => { viewerFilterState.qtr = e.target.value; applyViewerFilters(); });
+  }
+
+  function applyViewerFilters(){
+    if (!currentRawRows) return;
+    let rows = currentRawRows;
+    if (viewerFilterState.vendor) rows = rows.filter(r => r['Vendor'] === viewerFilterState.vendor);
+    if (viewerFilterState.qtr) rows = rows.filter(r => r['QTR'] === viewerFilterState.qtr);
+
+    const total = rows.length;
+    const closed = rows.filter(r=>r['Status']==='Closed').length;
+    const within = rows.filter(r=>r['SLA_calc']==='Within SLA').length;
+    const out = rows.filter(r=>r['SLA_calc']==='Out of SLA').length;
+    const pending = rows.filter(r=>r['SLA_calc']==='Pending').length;
+    const na = rows.filter(r=>r['SLA_calc']==='N/A').length;
+    const base = within+out;
+    const slaPct = base ? Math.round((within/base)*100) : 0;
+
+    document.getElementById('kpis').innerHTML = `
+      <div class="kpi"><div class="val">${total}</div><div class="lbl">Total Tickets</div></div>
+      <div class="kpi green"><div class="val">${closed}</div><div class="lbl">Closed</div></div>
+      <div class="kpi green"><div class="val">${within}</div><div class="lbl">Within SLA</div></div>
+      <div class="kpi red"><div class="val">${out}</div><div class="lbl">Out of SLA</div></div>
+      <div class="kpi amber"><div class="val">${slaPct}%</div><div class="lbl">SLA Adherence Rate</div></div>
+    `;
+
+    makeChart('chartSla', 'doughnut', ['Within SLA','Out of SLA','Pending','N/A'], [within, out, pending, na], ['#3ecf8e','#ff6b6b','#ffb84d','#5b5f7a']);
+
+    const csCounts = countByField(rows, 'Current Status');
+    makeChart('chartCurrentStatus', 'pie', Object.keys(csCounts), Object.values(csCounts), PALETTE);
+
+    const tradeCounts = countByField(rows, 'Problem Area');
+    makeChart('chartTrade', 'bar', Object.keys(tradeCounts), Object.values(tradeCounts), PALETTE);
+
+    const vendorCounts = countByField(rows, 'Vendor');
+    makeChart('chartVendor', 'bar', Object.keys(vendorCounts), Object.values(vendorCounts), PALETTE);
+
+    const qtrCounts = countByField(rows, 'QTR');
+    makeChart('chartQtr', 'bar', Object.keys(qtrCounts), Object.values(qtrCounts), PALETTE);
+  }
+
+  function countByField(rows, key){
+    const map = {};
+    rows.forEach(r => { const v = (r[key]==='' || r[key]===undefined) ? 'Unknown' : r[key]; map[v] = (map[v]||0)+1; });
+    return map;
   }
 
   function makeChart(id, type, labels, values, colors) {
