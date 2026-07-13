@@ -83,7 +83,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { firebaseConfig } from "./firebase-config.js";
 
   Chart.register(ChartDataLabels);
@@ -188,47 +188,76 @@
 
   document.getElementById('exportBtn').addEventListener('click', exportToExcel);
 
-  function exportToExcel() {
+  async function exportToExcel() {
     if (!currentDisti || !currentData) return;
-    const k = currentData.kpis || {};
-    const cs = currentData.currentStatusCounts || {};
-    const trade = currentData.tradeCounts || {};
-    const publishedAt = currentData.publishedAt ? new Date(currentData.publishedAt).toLocaleString() : 'N/A';
+    const exportBtn = document.getElementById('exportBtn');
+    const originalLabel = exportBtn.textContent;
+    exportBtn.disabled = true;
+    exportBtn.textContent = '⏳ Preparing file...';
 
-    const wb = XLSX.utils.book_new();
+    try {
+      const k = currentData.kpis || {};
+      const cs = currentData.currentStatusCounts || {};
+      const trade = currentData.tradeCounts || {};
+      const publishedAt = currentData.publishedAt ? new Date(currentData.publishedAt).toLocaleString() : 'N/A';
 
-    // Sheet 1: KPI Summary
-    const kpiRows = [
-      ['DISTI', currentDisti],
-      ['Last Updated', publishedAt],
-      [],
-      ['Metric', 'Value'],
-      ['Total Tickets', k.total ?? 0],
-      ['Closed Tickets', k.closed ?? 0],
-      ['Within SLA', k.within ?? 0],
-      ['Out of SLA', k.outOfSla ?? 0],
-      ['Pending', k.pending ?? 0],
-      ['N/A (no SLA target)', k.na ?? 0],
-      ['SLA Adherence Rate (%)', k.slaPct ?? 0]
-    ];
-    const wsKpi = XLSX.utils.aoa_to_sheet(kpiRows);
-    XLSX.utils.book_append_sheet(wb, wsKpi, 'KPI Summary');
+      const wb = XLSX.utils.book_new();
 
-    // Sheet 2: Current Status breakdown
-    const statusRows = [['Current Status', 'Ticket Count']];
-    Object.entries(cs).forEach(([status, count]) => statusRows.push([status, count]));
-    const wsStatus = XLSX.utils.aoa_to_sheet(statusRows);
-    XLSX.utils.book_append_sheet(wb, wsStatus, 'Current Status');
+      // Sheet 1: KPI Summary
+      const kpiRows = [
+        ['DISTI', currentDisti],
+        ['Last Updated', publishedAt],
+        [],
+        ['Metric', 'Value'],
+        ['Total Tickets', k.total ?? 0],
+        ['Closed Tickets', k.closed ?? 0],
+        ['Within SLA', k.within ?? 0],
+        ['Out of SLA', k.outOfSla ?? 0],
+        ['Pending', k.pending ?? 0],
+        ['N/A (no SLA target)', k.na ?? 0],
+        ['SLA Adherence Rate (%)', k.slaPct ?? 0]
+      ];
+      const wsKpi = XLSX.utils.aoa_to_sheet(kpiRows);
+      XLSX.utils.book_append_sheet(wb, wsKpi, 'KPI Summary');
 
-    // Sheet 3: Trade / Problem Area breakdown
-    const tradeRows = [['Trade / Problem Area', 'Ticket Count']];
-    Object.entries(trade).forEach(([area, count]) => tradeRows.push([area, count]));
-    const wsTrade = XLSX.utils.aoa_to_sheet(tradeRows);
-    XLSX.utils.book_append_sheet(wb, wsTrade, 'Trade Breakdown');
+      // Sheet 2: Current Status breakdown
+      const statusRows = [['Current Status', 'Ticket Count']];
+      Object.entries(cs).forEach(([status, count]) => statusRows.push([status, count]));
+      const wsStatus = XLSX.utils.aoa_to_sheet(statusRows);
+      XLSX.utils.book_append_sheet(wb, wsStatus, 'Current Status');
 
-    const dateStr = new Date().toISOString().slice(0,10);
-    const fileName = `${currentDisti}_summary_${dateStr}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+      // Sheet 3: Trade / Problem Area breakdown
+      const tradeRows = [['Trade / Problem Area', 'Ticket Count']];
+      Object.entries(trade).forEach(([area, count]) => tradeRows.push([area, count]));
+      const wsTrade = XLSX.utils.aoa_to_sheet(tradeRows);
+      XLSX.utils.book_append_sheet(wb, wsTrade, 'Trade Breakdown');
+
+      // Sheet 4: Full row-level ticket data (exact upload columns + system-added columns)
+      const docId = currentDisti;
+      const chunksSnap = await getDocs(collection(db, 'summaries', docId, 'rawRows'));
+      let allRows = [];
+      chunksSnap.forEach(chunkDoc => {
+        const chunkData = chunkDoc.data();
+        if (chunkData.rows) allRows = allRows.concat(chunkData.rows);
+      });
+
+      if (allRows.length > 0) {
+        const wsRaw = XLSX.utils.json_to_sheet(allRows);
+        XLSX.utils.book_append_sheet(wb, wsRaw, 'Full Ticket Data');
+      } else {
+        const wsRawEmpty = XLSX.utils.aoa_to_sheet([['No row-level data available for this publish. Ask admin to re-publish.']]);
+        XLSX.utils.book_append_sheet(wb, wsRawEmpty, 'Full Ticket Data');
+      }
+
+      const dateStr = new Date().toISOString().slice(0,10);
+      const fileName = `${currentDisti}_full_data_${dateStr}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+    } catch (e) {
+      alert('Export failed: ' + e.message);
+    }
+
+    exportBtn.disabled = false;
+    exportBtn.textContent = originalLabel;
   }
 </script>
 </body>
