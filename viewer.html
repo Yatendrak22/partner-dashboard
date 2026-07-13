@@ -5,6 +5,7 @@
 <title>Partner Summary — ACS Maintenance Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root{
     --bg:#0f1220; --card:#171b2e; --accent:#5b8def; --text:#e8eaf2; --muted:#9aa3c0;
@@ -22,6 +23,13 @@
     background:#2b3057; border:none; color:#fff; padding:8px 16px; border-radius:8px;
     font-size:13px; cursor:pointer;
   }
+  #exportBtn{
+    background:var(--green); border:none; color:#0f1220; padding:8px 16px; border-radius:8px;
+    font-size:13px; cursor:pointer; font-weight:700; margin-right:10px; display:inline-flex;
+    align-items:center; gap:6px;
+  }
+  #exportBtn:disabled{ opacity:.5; cursor:not-allowed; }
+  .header-actions{ display:flex; align-items:center; }
   main{ padding:24px 28px; }
   #loadingMsg, #errorMsg{ color:var(--muted); font-size:14px; padding:40px; text-align:center; }
   #errorMsg{ color:var(--red); }
@@ -51,7 +59,10 @@
     <h1 id="distiTitle">Loading your summary...</h1>
     <p>Read-only partner view — data published by ACS Maintenance</p>
   </div>
-  <button id="logoutBtn">Sign Out</button>
+  <div class="header-actions">
+    <button id="exportBtn" disabled>📊 Export My Data (.xlsx)</button>
+    <button id="logoutBtn">Sign Out</button>
+  </div>
 </header>
 
 <main>
@@ -82,6 +93,9 @@
   const db = getFirestore(app);
 
   const PALETTE = ['#5b8def','#3ecf8e','#ff6b6b','#ffb84d','#c792ea','#4ec9f0','#f0a500','#8bc34a','#e91e63','#607d8b'];
+
+  let currentDisti = null;
+  let currentData = null;
 
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     await signOut(auth);
@@ -119,6 +133,10 @@
   }
 
   function renderSummary(disti, data) {
+    currentDisti = disti;
+    currentData = data;
+    document.getElementById('exportBtn').disabled = false;
+
     document.getElementById('loadingMsg').style.display = 'none';
     document.getElementById('content').style.display = 'block';
     document.getElementById('distiTitle').textContent = disti + ' — Service Summary';
@@ -166,6 +184,51 @@
         } : {}
       }
     });
+  }
+
+  document.getElementById('exportBtn').addEventListener('click', exportToExcel);
+
+  function exportToExcel() {
+    if (!currentDisti || !currentData) return;
+    const k = currentData.kpis || {};
+    const cs = currentData.currentStatusCounts || {};
+    const trade = currentData.tradeCounts || {};
+    const publishedAt = currentData.publishedAt ? new Date(currentData.publishedAt).toLocaleString() : 'N/A';
+
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: KPI Summary
+    const kpiRows = [
+      ['DISTI', currentDisti],
+      ['Last Updated', publishedAt],
+      [],
+      ['Metric', 'Value'],
+      ['Total Tickets', k.total ?? 0],
+      ['Closed Tickets', k.closed ?? 0],
+      ['Within SLA', k.within ?? 0],
+      ['Out of SLA', k.outOfSla ?? 0],
+      ['Pending', k.pending ?? 0],
+      ['N/A (no SLA target)', k.na ?? 0],
+      ['SLA Adherence Rate (%)', k.slaPct ?? 0]
+    ];
+    const wsKpi = XLSX.utils.aoa_to_sheet(kpiRows);
+    XLSX.utils.book_append_sheet(wb, wsKpi, 'KPI Summary');
+
+    // Sheet 2: Current Status breakdown
+    const statusRows = [['Current Status', 'Ticket Count']];
+    Object.entries(cs).forEach(([status, count]) => statusRows.push([status, count]));
+    const wsStatus = XLSX.utils.aoa_to_sheet(statusRows);
+    XLSX.utils.book_append_sheet(wb, wsStatus, 'Current Status');
+
+    // Sheet 3: Trade / Problem Area breakdown
+    const tradeRows = [['Trade / Problem Area', 'Ticket Count']];
+    Object.entries(trade).forEach(([area, count]) => tradeRows.push([area, count]));
+    const wsTrade = XLSX.utils.aoa_to_sheet(tradeRows);
+    XLSX.utils.book_append_sheet(wb, wsTrade, 'Trade Breakdown');
+
+    const dateStr = new Date().toISOString().slice(0,10);
+    const fileName = `${currentDisti}_summary_${dateStr}.xlsx`;
+    XLSX.writeFile(wb, fileName);
   }
 </script>
 </body>
