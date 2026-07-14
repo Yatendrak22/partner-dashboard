@@ -107,6 +107,7 @@
   let currentData = null;
   let currentRawRows = null; // fetched lazily once filters are needed
   let viewerFilterState = { vendor: '', qtr: '' };
+  let viewerCharts = {}; // tracks active Chart.js instances per canvas id, so they can be destroyed before redraw
 
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     await signOut(auth);
@@ -269,7 +270,11 @@
 
   function makeChart(id, type, labels, values, colors) {
     const isPieLike = type === 'pie' || type === 'doughnut';
-    new Chart(document.getElementById(id), {
+    const ctx = document.getElementById(id);
+    if (viewerCharts[id]) {
+      viewerCharts[id].destroy();
+    }
+    viewerCharts[id] = new Chart(ctx, {
       type,
       data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: isPieLike?2:0, borderColor:'#171b2e' }] },
       options: {
