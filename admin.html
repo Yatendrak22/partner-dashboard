@@ -273,6 +273,46 @@
     });
   }
 
+  function ovMakeChart(id, type, labels, data, colors, pctBase){
+    const ctx = document.getElementById(id);
+    if(overviewCharts[id]) overviewCharts[id].destroy();
+    const isPieLike = type === 'pie' || type === 'doughnut';
+    overviewCharts[id] = new Chart(ctx, {
+      type,
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: isPieLike?2:0, borderColor:'#171b2e' }] },
+      options: {
+        plugins: {
+          legend: {
+            position: type==='bar' ? 'none' : 'right',
+            labels: {
+              color:'#e8eaf2', font:{size:10.5},
+              generateLabels: isPieLike ? (chart) => {
+                const ds = chart.data.datasets[0];
+                const base = (pctBase !== undefined && pctBase > 0) ? pctBase : ds.data.reduce((a,b)=>a+b,0);
+                return chart.data.labels.map((label, i) => {
+                  const value = ds.data[i];
+                  const pct = base ? Math.round((value/base)*100) : 0;
+                  return {
+                    text: `${label}: ${value} (${pct}%)`,
+                    fillStyle: ds.backgroundColor[i],
+                    strokeStyle: ds.borderColor,
+                    lineWidth: ds.borderWidth,
+                    fontColor: '#e8eaf2', color: '#e8eaf2',
+                    index: i
+                  };
+                });
+              } : undefined
+            }
+          }
+        },
+        scales: type==='bar' ? {
+          x:{ ticks:{color:'#9aa3c0', font:{size:10}}, grid:{color:'#262b45'} },
+          y:{ ticks:{color:'#9aa3c0'}, grid:{color:'#262b45'} }
+        } : {}
+      }
+    });
+  }
+
   function renderOverview(){
     document.getElementById('overview').style.display = 'block';
     buildOverviewFilters();
@@ -284,8 +324,8 @@
     const out = rows.filter(r=>r['SLA_calc']==='Out of SLA').length;
     const pending = rows.filter(r=>r['SLA_calc']==='Pending').length;
     const na = rows.filter(r=>r['SLA_calc']==='N/A').length;
-    const base = within+out;
-    const slaPct = base ? Math.round((within/base)*100) : 0;
+    // SLA Adherence Rate = % of CLOSED tickets that were within SLA (matches KPI card definition used elsewhere)
+    const slaPct = closed ? Math.round((within/closed)*100) : 0;
 
     document.getElementById('overviewKpis').innerHTML = `
       <div class="kpi"><div class="val">${total}</div><div class="lbl">Total Tickets</div></div>
@@ -301,7 +341,8 @@
     ovMakeChart('ovChartSla', 'doughnut',
       ['Within SLA','Out of SLA','Pending','N/A'],
       [within, out, pending, na],
-      ['#3ecf8e','#ff6b6b','#ffb84d','#5b5f7a']
+      ['#3ecf8e','#ff6b6b','#ffb84d','#5b5f7a'],
+      closed
     );
 
     const statusCounts = countBy(rows, 'Current Status');

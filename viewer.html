@@ -191,7 +191,8 @@
     makeChart('chartSla', 'doughnut',
       ['Within SLA','Out of SLA','Pending','N/A'],
       [k.within ?? 0, k.outOfSla ?? 0, k.pending ?? 0, k.na ?? 0],
-      ['#3ecf8e','#ff6b6b','#ffb84d','#5b5f7a']
+      ['#3ecf8e','#ff6b6b','#ffb84d','#5b5f7a'],
+      k.closed ?? 0
     );
 
     const cs = data.currentStatusCounts || {};
@@ -273,7 +274,7 @@
       <div class="kpi amber"><div class="val">${slaPct}%</div><div class="lbl">SLA Adherence Rate</div></div>
     `;
 
-    makeChart('chartSla', 'doughnut', ['Within SLA','Out of SLA','Pending','N/A'], [within, out, pending, na], ['#3ecf8e','#ff6b6b','#ffb84d','#5b5f7a']);
+    makeChart('chartSla', 'doughnut', ['Within SLA','Out of SLA','Pending','N/A'], [within, out, pending, na], ['#3ecf8e','#ff6b6b','#ffb84d','#5b5f7a'], closed);
 
     const csCounts = countByField(rows, 'Current Status');
     makeChart('chartCurrentStatus', 'pie', Object.keys(csCounts), Object.values(csCounts), PALETTE);
@@ -294,7 +295,7 @@
     return map;
   }
 
-  function makeChart(id, type, labels, values, colors) {
+  function makeChart(id, type, labels, values, colors, pctBase) {
     const isPieLike = type === 'pie' || type === 'doughnut';
     const ctx = document.getElementById(id);
     if (viewerCharts[id]) {
@@ -313,10 +314,12 @@
               color:'#e8eaf2', font:{size:10.5},
               generateLabels: isPieLike ? (chart) => {
                 const ds = chart.data.datasets[0];
-                const total = ds.data.reduce((a,b)=>a+b,0);
+                // Use explicit pctBase (e.g., closed tickets only) if provided,
+                // otherwise fall back to summing all slices (default pie behavior).
+                const base = (pctBase !== undefined && pctBase > 0) ? pctBase : ds.data.reduce((a,b)=>a+b,0);
                 return chart.data.labels.map((label, i) => {
                   const value = ds.data[i];
-                  const pct = total ? Math.round((value/total)*100) : 0;
+                  const pct = base ? Math.round((value/base)*100) : 0;
                   return {
                     text: `${label}: ${value} (${pct}%)`,
                     fillStyle: ds.backgroundColor[i],
