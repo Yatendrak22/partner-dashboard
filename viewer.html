@@ -12,51 +12,77 @@
     --green:#3ecf8e; --red:#ff6b6b; --amber:#ffb84d;
   }
   *{box-sizing:border-box;}
-  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }
-  header{
-    padding:18px 28px; background:linear-gradient(135deg,#1c2140,#0f1220);
-    border-bottom:1px solid #262b45; display:flex; align-items:center; justify-content:space-between;
+  html, body{ height:100%; margin:0; overflow:hidden; }
+  body{
+    display:flex; flex-direction:column;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text);
   }
-  header h1{ font-size:19px; margin:0; font-weight:600; }
-  header p{ margin:3px 0 0; color:var(--muted); font-size:12.5px; }
+  header{
+    padding:14px 24px; background:linear-gradient(135deg,#1c2140,#0f1220);
+    border-bottom:1px solid #262b45; display:flex; align-items:center; justify-content:space-between;
+    flex-shrink:0;
+  }
+  header h1{ font-size:17px; margin:0; font-weight:600; }
+  header p{ margin:2px 0 0; color:var(--muted); font-size:11.5px; }
   #logoutBtn{
-    background:#2b3057; border:none; color:#fff; padding:8px 16px; border-radius:8px;
-    font-size:13px; cursor:pointer;
+    background:#2b3057; border:none; color:#fff; padding:7px 14px; border-radius:8px;
+    font-size:12.5px; cursor:pointer;
   }
   #exportBtn{
-    background:var(--green); border:none; color:#0f1220; padding:8px 16px; border-radius:8px;
-    font-size:13px; cursor:pointer; font-weight:700; margin-right:10px; display:inline-flex;
+    background:var(--green); border:none; color:#0f1220; padding:7px 14px; border-radius:8px;
+    font-size:12.5px; cursor:pointer; font-weight:700; margin-right:10px; display:inline-flex;
     align-items:center; gap:6px;
   }
   #exportBtn:disabled{ opacity:.5; cursor:not-allowed; }
   .header-actions{ display:flex; align-items:center; }
-  main{ padding:24px 28px; }
+
+  main{
+    flex:1; min-height:0; padding:14px 24px; display:flex; flex-direction:column; overflow:hidden;
+  }
   #loadingMsg, #errorMsg{ color:var(--muted); font-size:14px; padding:40px; text-align:center; }
   #errorMsg{ color:var(--red); }
 
-  .kpis{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:20px; }
-  .kpi{ background:var(--card); border-radius:12px; padding:14px 16px; border:1px solid #262b45; }
-  .kpi .val{ font-size:22px; font-weight:700; }
-  .kpi .lbl{ font-size:11px; color:var(--muted); margin-top:3px; }
+  #content{ flex:1; min-height:0; display:flex; flex-direction:column; }
+
+  .kpis{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:10px; flex-shrink:0; }
+  .kpi{ background:var(--card); border-radius:10px; padding:10px 12px; border:1px solid #262b45; }
+  .kpi .val{ font-size:19px; font-weight:700; line-height:1.1; }
+  .kpi .lbl{ font-size:10.5px; color:var(--muted); margin-top:2px; }
   .kpi.green .val{ color:var(--green); }
   .kpi.red .val{ color:var(--red); }
   .kpi.amber .val{ color:var(--amber); }
 
-  .filters{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .filters{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; flex-shrink:0; }
   .filters select{
     background:var(--card); color:var(--text); border:1px solid #2b3057; border-radius:8px;
-    padding:7px 12px; font-size:12.5px;
+    padding:6px 12px; font-size:12px;
   }
 
-  .grid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-bottom:16px; }
-  .card{ background:var(--card); border-radius:12px; padding:14px 16px; border:1px solid #262b45; }
-  .card h3{ margin:0 0 10px; font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
-  canvas{ max-height:250px; }
+  .grid{
+    flex:1; min-height:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+    grid-template-rows:repeat(2,minmax(0,1fr)); gap:10px;
+  }
+  .card{
+    background:var(--card); border-radius:10px; padding:10px 12px; border:1px solid #262b45;
+    display:flex; flex-direction:column; min-height:0; overflow:hidden;
+  }
+  .card h3{ margin:0 0 6px; font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.4px; flex-shrink:0; }
+  .chart-wrap{ position:relative; flex:1; min-height:0; }
+  .chart-wrap canvas{ position:absolute; top:0; left:0; width:100% !important; height:100% !important; }
 
-  #lastUpdated{ color:var(--muted); font-size:12px; margin-top:16px; text-align:right; }
+  #lastUpdated{ color:var(--muted); font-size:11px; margin-top:6px; text-align:right; flex-shrink:0; }
 
-  @media (max-width: 1100px){ .grid{ grid-template-columns:repeat(2,1fr); } .kpis{ grid-template-columns:repeat(3,1fr); } }
-  @media (max-width: 700px){ .grid{ grid-template-columns:1fr; } .kpis{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width: 1100px){
+    .grid{ grid-template-columns:repeat(2,1fr); grid-template-rows:repeat(3,minmax(0,1fr)); }
+    .kpis{ grid-template-columns:repeat(3,1fr); }
+  }
+  @media (max-width: 700px){
+    html, body{ overflow:auto; }
+    main{ overflow:visible; }
+    .grid{ grid-template-columns:1fr; grid-template-rows:none; }
+    .card{ min-height:260px; }
+    .kpis{ grid-template-columns:repeat(2,1fr); }
+  }
 </style>
 </head>
 <body>
@@ -79,11 +105,11 @@
     <div class="filters" id="viewerFilters"></div>
     <div class="kpis" id="kpis"></div>
     <div class="grid">
-      <div class="card"><h3>SLA Adherence</h3><canvas id="chartSla"></canvas></div>
-      <div class="card"><h3>Current Status</h3><canvas id="chartCurrentStatus"></canvas></div>
-      <div class="card"><h3>Trade / Problem Area</h3><canvas id="chartTrade"></canvas></div>
-      <div class="card"><h3>Vendor-wise Tickets</h3><canvas id="chartVendor"></canvas></div>
-      <div class="card"><h3>Quarter-wise Tickets</h3><canvas id="chartQtr"></canvas></div>
+      <div class="card"><h3>SLA Adherence</h3><div class="chart-wrap"><canvas id="chartSla"></canvas></div></div>
+      <div class="card"><h3>Current Status</h3><div class="chart-wrap"><canvas id="chartCurrentStatus"></canvas></div></div>
+      <div class="card"><h3>Trade / Problem Area</h3><div class="chart-wrap"><canvas id="chartTrade"></canvas></div></div>
+      <div class="card"><h3>Vendor-wise Tickets</h3><div class="chart-wrap"><canvas id="chartVendor"></canvas></div></div>
+      <div class="card"><h3>Quarter-wise Tickets</h3><div class="chart-wrap"><canvas id="chartQtr"></canvas></div></div>
     </div>
     <div id="lastUpdated"></div>
   </div>
@@ -278,6 +304,8 @@
       type,
       data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: isPieLike?2:0, borderColor:'#171b2e' }] },
       options: {
+        responsive: true,
+        maintainAspectRatio: false,
         plugins: {
           legend: {
             position: type==='bar' ? 'none' : 'right',
